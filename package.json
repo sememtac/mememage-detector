@@ -1,0 +1,39 @@
+{
+  "name": "mememage-detector",
+  "version": "0.1.0",
+  "description": "Framework-agnostic image-detection engine for Mememage bars — watch a DOM, find every marked image, report where each bar sits, track it through the page's life. Decode is injected; the detector owns no network.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./global": "./dist/mememage-detector.global.js",
+    "./package.json": "./package.json"
+  },
+  "main": "./src/index.js",
+  "files": [
+    "src",
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node test/smoke.mjs"
+  },
+  "keywords": [
+    "mememage",
+    "provenance",
+    "detector",
+    "watermark",
+    "image",
+    "browser"
+  ],
+  "license": "MIT",
+  "author": "Catmemes",
+  "homepage": "https://mememage.art",
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sememtac/mememage-detector.git"
+  }
+}
