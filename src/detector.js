@@ -259,7 +259,18 @@ export function createDetector(deps) {
     }
     send({ t: "scan", url: scanUrl }).then(function (r) {
       if ((img.currentSrc || img.src) !== url) return;  // src changed while we awaited
-      if (r && r.found) detect(img, r);
+      if (r && r.found) { detect(img, r); return; }
+      // The transport could not FETCH the image (an error, not a clean "no bar"). The
+      // image is already loaded in the page, so re-encode it here and retry — this reaches
+      // same-origin images the transport can't (self-signed TLS, auth-gated endpoints, a
+      // streaming quirk). A cross-origin image taints the canvas → imgToDataUrl is null → stop.
+      if (r && r.error && scanUrl.slice(0, 5) !== "data:") {
+        var reUrl = imgToDataUrl(img);
+        if (!reUrl) return;
+        send({ t: "scan", url: reUrl }).then(function (r2) {
+          if ((img.currentSrc || img.src) === url && r2 && r2.found) detect(img, r2);
+        });
+      }
     });
   }
   function onImgLoad(img) {
@@ -378,6 +389,21 @@ export function createDetector(deps) {
       if (r && r.found && r.bars && r.bars.length) {
         if (el) el._mmScannedSrc = el.currentSrc || el.src;
         return { found: true, detection: el ? detect(el, r) : toDetection(el, r) };
+      }
+      // Transport fetch failed — retry via an in-page re-encode (reaches same-origin
+      // images the transport can't). Only possible when we have the element to canvas.
+      if (r && r.error && el && decodeUrl.slice(0, 5) !== "data:") {
+        var reUrl = imgToDataUrl(el);
+        if (reUrl) {
+          return send({ t: "decode", url: reUrl }).then(function (r2) {
+            if (r2 && r2.found && r2.bars && r2.bars.length) {
+              el._mmScannedSrc = el.currentSrc || el.src;
+              return { found: true, detection: detect(el, r2) };
+            }
+            if (r2 && r2.error) return { error: r2.error };
+            return { noBar: true };
+          });
+        }
       }
       if (r && r.error) return { error: r.error };
       return { noBar: true };
