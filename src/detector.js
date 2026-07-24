@@ -57,7 +57,12 @@ export function createDetector(deps) {
     var fn = (msg.t === "decode") ? decode : scan;
     try {
       var p = fn(msg.url);
-      return (p && typeof p.then === "function") ? p : Promise.resolve(p || null);
+      // A rejected decode/scan promise is treated as "no result" (null) — parity with the
+      // synchronous-throw guard below. Without the .catch the rejection escaped through every
+      // scanImg/scanCanvas/scanBg .then() as an unhandled promise rejection.
+      return (p && typeof p.then === "function")
+        ? p.catch(function () { return null; })
+        : Promise.resolve(p || null);
     } catch (e) { return Promise.resolve(null); }
   }
 
@@ -92,7 +97,10 @@ export function createDetector(deps) {
   }
   function fireDom(name, el, detail, cancelable) {
     try {
-      return el.dispatchEvent(new CustomEvent(name, {
+      // win.CustomEvent, not the ambient global: every other DOM API routes through the
+      // injected window, so a mismatched realm (jsdom / SSR / cross-frame) would otherwise
+      // silently no-op the whole DOM-event channel and quietly drop preventDefault suppression.
+      return el.dispatchEvent(new win.CustomEvent(name, {
         detail: detail || {}, bubbles: true, cancelable: !!cancelable }));  // false = preventDefault called
     } catch (e) { return true; }
   }
@@ -237,7 +245,13 @@ export function createDetector(deps) {
     if (!detectedEls.has(el)) return;
     detectedEls.delete(el);
     resizeObs.unobserve(el);
-    fireDom("mememage:removed", el, {}, false);
+    // Dispatch on el while it is still in the document (src-change) so the event bubbles to
+    // delegated listeners. On node removal el is already DETACHED — a detached element can't
+    // bubble, so a document-level listener would never hear it. Dispatch on a connected
+    // fallback (root, else document) instead. The in-world emit below always carries the
+    // element for consumers that use on("removed").
+    var target = el.isConnected ? el : (root && root.isConnected ? root : doc);
+    fireDom("mememage:removed", target, {}, false);
     emit("removed", { element: el });
   }
 
@@ -425,9 +439,22 @@ export function createDetector(deps) {
     doc.addEventListener("animationstart", onAnim, true);
     discover(root);
     mo = new win.MutationObserver(function (muts) {
+      var sawRemoval = false;
       muts.forEach(function (m) {
         m.addedNodes && m.addedNodes.forEach(function (n) { if (n.nodeType === 1) discover(n); });
+        if (m.removedNodes && m.removedNodes.length) sawRemoval = true;
       });
+      // A removed <img> — or a removed container that held detected images — leaves the
+      // document but stays strongly referenced in detectedEls (and observed by resizeObs):
+      // an unbounded leak under SPA / infinite-scroll churn, and a 'removed' the consumer's
+      // marker cleanup never receives. On any removal, drop every detection whose element is
+      // no longer connected. detectedEls holds only BARRED elements (few), so the sweep is
+      // cheap even on churny pages. Collect first — undetect() mutates the set.
+      if (sawRemoval && detectedEls.size) {
+        var gone = [];
+        detectedEls.forEach(function (el) { if (!el.isConnected) gone.push(el); });
+        gone.forEach(undetect);
+      }
     });
     mo.observe(root, { childList: true, subtree: true });
   }
